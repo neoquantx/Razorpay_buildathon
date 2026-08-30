@@ -1,0 +1,5 @@
+{
+  "t-shirt": {"suggested_item": "cap", "price_inr": 150, "pitch": "a matching cap for 150 rupees"},
+  "jacket": {"suggested_item": "waterproofing spray", "price_inr": 250, "pitch": "waterproofing spray for 250 rupees to protect it"},
+  "shirt": {"suggested_item": "cap", "price_inr": 150, "pitch": "a matching cap for 150 rupees"}
+}
