@@ -31,6 +31,12 @@ def check_action(amount_inr: float, revoked: bool, recent_amounts: list[dict]) -
             "reason": "The action has been revoked."
         }
     
+    if amount_inr > MAX_ALLOWED_LIMIT:
+        return {
+            "decision": "denied",
+            "reason": f"Amount {amount_inr} INR exceeds the maximum allowed limit of {MAX_ALLOWED_LIMIT} INR."
+        }
+        
     # Structuring check
     now = datetime.now(timezone.utc)
     structuring_window_start = now - timedelta(minutes=STRUCTURING_WINDOW_MINUTES)
@@ -57,15 +63,10 @@ def check_action(amount_inr: float, revoked: bool, recent_amounts: list[dict]) -
             "decision": "approved",
             "reason": f"Amount {amount_inr} INR is under the auto-approve limit of {AUTO_APPROVE_LIMIT} INR."
         }
-    elif amount_inr <= MAX_ALLOWED_LIMIT:
+    else:
         return {
             "decision": "needs_confirmation",
             "reason": f"Amount {amount_inr} INR is between {AUTO_APPROVE_LIMIT} and {MAX_ALLOWED_LIMIT} INR, requiring manual confirmation."
-        }
-    else:
-        return {
-            "decision": "denied",
-            "reason": f"Amount {amount_inr} INR exceeds the maximum allowed limit of {MAX_ALLOWED_LIMIT} INR."
         }
 
 if __name__ == "__main__":
