@@ -1,11 +1,12 @@
 import os
 import sys
 from dotenv import load_dotenv
+from pathlib import Path
 from google import genai
 
 def main():
     # Load environment variables from .env file
-    load_dotenv()
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env")
     
     # Check if the API key is set
     api_key = os.getenv("GEMINI_API_KEY")
