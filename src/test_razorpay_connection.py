@@ -2,10 +2,11 @@ import os
 import sys
 import razorpay
 from dotenv import load_dotenv
+from pathlib import Path
 
 def main():
     # Load environment variables from .env file
-    load_dotenv()
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env")
     
     # Check if the API keys are set
     key_id = os.getenv("RAZORPAY_KEY_ID")
