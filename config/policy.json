@@ -3,5 +3,6 @@
   "max_allowed_limit_inr": 2000,
   "structuring_window_minutes": 10,
   "structuring_limit_inr": 1800,
-  "min_amount_inr": 1
+  "min_amount_inr": 1,
+  "negotiation_floor_pct": 10
 }
