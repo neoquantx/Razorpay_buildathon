@@ -1,3 +1,4 @@
+import json
 import os
 import sys
 from datetime import datetime, timezone
@@ -13,9 +14,30 @@ import session_state
 import idempotency
 import upsell
 import metrics
+import negotiation
+import price_check
+from price_check import verify_item_price  # re-exported for agent-internal use
+
+# Load the product catalog for the negotiate_price tool
+_PRODUCTS_PATH = os.path.join(os.path.dirname(__file__), '..', 'config', 'products.json')
+
+def _load_products() -> dict:
+    """Return the product catalog; empty dict if the file is missing."""
+    if not os.path.exists(_PRODUCTS_PATH):
+        return {}
+    with open(_PRODUCTS_PATH, 'r') as _f:
+        return json.load(_f)
+
 
 def create_payment(amount_inr: float, item_description: str):
     """Creates a payment order for the specified amount and item."""
+    pass
+
+def negotiate_price(item_name: str, requested_price_inr: float) -> dict:
+    """
+    Check whether a requested price for a catalog item is within the merchant's
+    negotiation policy. Returns the policy decision — never invent a discount.
+    """
     pass
 
 def main():
@@ -49,9 +71,13 @@ def main():
                     "— only if they say yes should you call create_payment again for it. "
                     "If a customer declines an upsell offer (says no, not now, etc.), acknowledge it warmly in one sentence and move on. "
                     "Never repeat, rephrase, or re-offer the same suggestion again in this conversation. "
-                    "Never use urgency, scarcity, or guilt to encourage a yes — a single honest offer is enough, and a 'no' is final."
+                    "Never use urgency, scarcity, or guilt to encourage a yes — a single honest offer is enough, and a 'no' is final. "
+                    "If a customer asks for a discount or tries to negotiate, always call negotiate_price for the real answer — "
+                    "never invent or promise a discount yourself. Relay exactly what the tool returns: if accepted, confirm that price; "
+                    "if countered, offer the counter as the best available; if rejected, explain why. "
+                    "If the customer accepts a countered or accepted price, proceed to create_payment using that exact final price."
                 ),
-                tools=[create_payment],
+                tools=[create_payment, negotiate_price],
                 automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
             )
         )
@@ -101,16 +127,27 @@ def main():
                         item_description = tool_call.args.get("item_description", "Unknown item")
                         
                         print(f"\n[Agent wants to call create_payment(amount_inr={amount_inr}, item_description='{item_description}')]")
-                        
-                        # 1. Guardrail & Catalog Check
-                        expected_price = upsell.get_expected_upsell_price(item_description)
-                        if expected_price is not None and amount_inr != expected_price:
-                            decision_result = {
-                                "decision": "denied_price_mismatch",
-                                "reason": f"Price mismatch for a known catalog item — expected ₹{expected_price}, request was for ₹{amount_inr}. Possible manipulation."
-                            }
-                        else:
-                            decision_result = guardrail.check_action(amount_inr, revoked, recent_amounts)
+
+                        # 1. Price-integrity check — runs BEFORE the guardrail.
+                        #    Covers all known catalog items (not just upsell targets).
+                        price_check = verify_item_price(item_description, amount_inr, state)
+                        if not price_check["ok"]:
+                            reason = price_check["reason"]
+                            audit_log.log_action("create_payment", amount_inr, reason, "denied_price_mismatch")
+                            tool_result = {"status": "denied", "reason": reason}
+                            print(f"\n[System] Payment denied (price mismatch): {reason}")
+                            followup_response = chat.send_message(
+                                types.Part.from_function_response(
+                                    name="create_payment",
+                                    response=tool_result
+                                )
+                            )
+                            if followup_response.text:
+                                print(f"\nAgent: {followup_response.text}")
+                            continue
+
+                        # 2. Guardrail check (only reached when price is valid)
+                        decision_result = guardrail.check_action(amount_inr, revoked, recent_amounts)
                             
                         decision = decision_result["decision"]
                         reason = decision_result["reason"]
@@ -208,6 +245,62 @@ def main():
                             )
                         )
                         if not skip_gemini_print and followup_response.text:
+                            print(f"\nAgent: {followup_response.text}")
+
+                    elif tool_call.name == "negotiate_price":
+                        item_name = tool_call.args.get("item_name", "")
+                        requested_price_inr = tool_call.args.get("requested_price_inr", 0.0)
+
+                        print(f"\n[Agent wants to call negotiate_price(item_name='{item_name}', requested_price_inr={requested_price_inr})]")
+
+                        # Look up authoritative catalog price (case-insensitive)
+                        catalog = _load_products()
+                        item_key = None
+                        for k in catalog:
+                            if k.lower() == item_name.lower():
+                                item_key = k
+                                break
+
+                        if item_key is None:
+                            neg_result = {
+                                "decision": "item_not_found",
+                                "reason": f"'{item_name}' was not found in the catalog."
+                            }
+                        else:
+                            catalog_price = catalog[item_key]["price_inr"]
+                            neg_result = negotiation.evaluate_negotiation(catalog_price, requested_price_inr)
+
+                        decision = neg_result.get("decision", "unknown")
+                        reason = neg_result.get("reason", "")
+
+                        # Audit every attempt — accepted or not
+                        audit_log.log_action(
+                            action="negotiate_price",
+                            amount_inr=requested_price_inr,
+                            reason=reason,
+                            outcome=decision
+                        )
+
+                        # Persist the final price so verify_item_price can authorise it
+                        # when the customer later calls create_payment at that price.
+                        # Only "accepted" and "countered" yield a real usable price.
+                        if decision in ("accepted", "countered") and item_key is not None:
+                            state["last_negotiation"] = {
+                                "item_name": item_key,
+                                "final_price_inr": neg_result["final_price_inr"],
+                            }
+                            session_state.save_state(state)
+
+                        print(f"[Negotiation] decision={decision}, result={neg_result}")
+
+                        # Return result to Gemini
+                        followup_response = chat.send_message(
+                            types.Part.from_function_response(
+                                name="negotiate_price",
+                                response=neg_result
+                            )
+                        )
+                        if followup_response.text:
                             print(f"\nAgent: {followup_response.text}")
 
             else:
