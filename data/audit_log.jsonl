@@ -1,7 +1,0 @@
-{"timestamp": "2026-09-01T09:01:44.544667+00:00", "action": "shopper_buy_value_mart", "amount": 1150, "reason": "Amount 1150 INR is between 500 and 2000 INR, requiring manual confirmation.", "outcome": "needs_confirmation"}
-{"timestamp": "2026-09-01T09:01:50.952514+00:00", "action": "shopper_buy_value_mart", "amount": 1150, "reason": "User confirmed", "outcome": "approved after confirmation"}
-{"timestamp": "2026-09-01T09:09:09.925705+00:00", "action": "mcp_create_purchase", "amount": 300, "reason": "Amount 300 INR is under the auto-approve limit of 500 INR.", "outcome": "approved"}
-{"timestamp": "2026-09-01T09:09:09.929019+00:00", "action": "shopper_buy_trail_supply", "amount": 280, "reason": "Amount 280 INR is under the auto-approve limit of 500 INR.", "outcome": "approved"}
-{"timestamp": "2026-09-01T09:09:09.930253+00:00", "action": "shopper_buy_trail_supply", "amount": 2700, "reason": "Amount 2700 INR exceeds the maximum allowed limit of 2000 INR.", "outcome": "denied"}
-{"timestamp": "2026-09-01T09:09:09.931959+00:00", "action": "shopper_buy_value_mart", "amount": 1150, "reason": "Amount 1150 INR is between 500 and 2000 INR, requiring manual confirmation.", "outcome": "needs_confirmation"}
-{"timestamp": "2026-09-01T09:09:09.934220+00:00", "action": "shopper_buy_trail_supply", "amount": 140, "reason": "The action has been revoked.", "outcome": "denied"}
