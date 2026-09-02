@@ -1,9 +1,13 @@
 {
-  "revoked": false,
+  "revoked": true,
   "recent_amounts": [
     {
-      "amount_inr": 300,
-      "timestamp": "2026-08-31T19:25:13.238140+00:00"
+      "amount_inr": 280,
+      "timestamp": "2026-09-01T09:09:09.927937+00:00"
+    },
+    {
+      "amount_inr": 123.45,
+      "timestamp": "test_marker_1788253749.93898"
     }
   ]
 }
