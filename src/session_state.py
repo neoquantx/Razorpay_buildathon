@@ -1,3 +1,4 @@
+"""Session state management for tracking active sessions."""
 import json
 import os
 
