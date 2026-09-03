@@ -1,3 +1,4 @@
+"""Audit logging system for tracking payment actions and outcomes."""
 import json
 import os
 from datetime import datetime, timezone
