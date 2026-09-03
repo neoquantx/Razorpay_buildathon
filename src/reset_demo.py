@@ -1,3 +1,4 @@
+"""Utility script to reset all demo state files to their initial values."""
 import os
 import json
 
