@@ -1,3 +1,4 @@
+"""Idempotency store to prevent duplicate payment processing."""
 import json
 import os
 import hashlib
