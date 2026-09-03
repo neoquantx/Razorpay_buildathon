@@ -1,3 +1,4 @@
+"""Metrics tracking system for orders, revenue, and upsell conversion."""
 import json
 import os
 
