@@ -1,3 +1,4 @@
+"""MCP Server exposing Razorpay catalog and purchase operations."""
 import sys
 import os
 import json
