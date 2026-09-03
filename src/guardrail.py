@@ -1,3 +1,4 @@
+"""Guardrail system to enforce velocity, limits, and revocation rules."""
 import json
 import os
 from datetime import datetime, timezone, timedelta
