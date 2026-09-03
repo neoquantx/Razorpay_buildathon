@@ -1,3 +1,4 @@
+"""Utility script to summarize and display business metrics."""
 import metrics
 
 def main():
