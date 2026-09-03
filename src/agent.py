@@ -1,3 +1,4 @@
+"""Main checkout agent integrating Gemini, Razorpay, and safety constraints."""
 import json
 import os
 import sys
@@ -29,6 +30,47 @@ def _load_products() -> dict:
         return json.load(_f)
 
 
+def build_system_instruction() -> str:
+    """Build the Ledger system instruction with live catalog prices baked in."""
+    catalog = _load_products()
+
+    # Format a short, readable price list from the catalog
+    if catalog:
+        items = ", ".join(
+            f"{name} - \u20b9{info['price_inr']}"
+            for name, info in catalog.items()
+        )
+        price_list = f"Current catalog: {items}."
+    else:
+        price_list = "No catalog is currently loaded."
+
+    persona = (
+        "You are Ledger, a checkout assistant for an online merchant. "
+        f"{price_list} "
+        "You already know these prices \u2014 if a customer doesn\u2019t state one, "
+        "quote the correct catalog price yourself instead of asking them what it costs. "
+        "You help customers complete purchases naturally. You are aware that "
+        "all purchases are checked against a spending policy before anything happens \u2014 "
+        "orders under \u20b9500 are automatic, orders between \u20b9500 and \u20b92000 need the "
+        "customer\u2019s confirmation, and orders above \u20b92000 are not allowed. "
+        "If a payment is denied or fails, explain why in a calm, clear, and reassuring way, "
+        "and suggest what the customer could do instead. Keep responses brief and conversational, "
+        "like a helpful human assistant, not a robotic system log. "
+        "If the tool result includes an upsell_suggestion field, naturally offer exactly that "
+        "add-on to the customer in one short, friendly sentence after confirming "
+        "their purchase, then wait for their response. Never add it automatically "
+        "\u2014 only if they say yes should you call create_payment again for it. "
+        "If a customer declines an upsell offer (says no, not now, etc.), acknowledge it warmly in one sentence and move on. "
+        "Never repeat, rephrase, or re-offer the same suggestion again in this conversation. "
+        "Never use urgency, scarcity, or guilt to encourage a yes \u2014 a single honest offer is enough, and a \u2018no\u2019 is final. "
+        "If a customer asks for a discount or tries to negotiate, always call negotiate_price for the real answer \u2014 "
+        "never invent or promise a discount yourself. Relay exactly what the tool returns: if accepted, confirm that price; "
+        "if countered, offer the counter as the best available; if rejected, explain why. "
+        "If the customer accepts a countered or accepted price, proceed to create_payment using that exact final price."
+    )
+    return persona
+
+
 def create_payment(amount_inr: float, item_description: str):
     """Creates a payment order for the specified amount and item."""
     pass
@@ -56,27 +98,7 @@ def main():
         chat = client.chats.create(
             model='gemini-2.5-flash',
             config=types.GenerateContentConfig(
-                system_instruction=(
-                    "You are Ledger, a checkout assistant for an online merchant. "
-                    "You help customers complete purchases naturally. You are aware that "
-                    "all purchases are checked against a spending policy before anything happens — "
-                    "orders under ₹500 are automatic, orders between ₹500 and ₹2000 need the "
-                    "customer's confirmation, and orders above ₹2000 are not allowed. "
-                    "If a payment is denied or fails, explain why in a calm, clear, and reassuring way, "
-                    "and suggest what the customer could do instead. Keep responses brief and conversational, "
-                    "like a helpful human assistant, not a robotic system log. "
-                    "If the tool result includes an upsell_suggestion field, naturally offer exactly that "
-                    "add-on to the customer in one short, friendly sentence after confirming "
-                    "their purchase, then wait for their response. Never add it automatically "
-                    "— only if they say yes should you call create_payment again for it. "
-                    "If a customer declines an upsell offer (says no, not now, etc.), acknowledge it warmly in one sentence and move on. "
-                    "Never repeat, rephrase, or re-offer the same suggestion again in this conversation. "
-                    "Never use urgency, scarcity, or guilt to encourage a yes — a single honest offer is enough, and a 'no' is final. "
-                    "If a customer asks for a discount or tries to negotiate, always call negotiate_price for the real answer — "
-                    "never invent or promise a discount yourself. Relay exactly what the tool returns: if accepted, confirm that price; "
-                    "if countered, offer the counter as the best available; if rejected, explain why. "
-                    "If the customer accepts a countered or accepted price, proceed to create_payment using that exact final price."
-                ),
+                system_instruction=build_system_instruction(),
                 tools=[create_payment, negotiate_price],
                 automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
             )
