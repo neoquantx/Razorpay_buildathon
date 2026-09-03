@@ -1,3 +1,4 @@
+"""Utility script to format and display the audit log."""
 import audit_log
 from datetime import datetime
 
