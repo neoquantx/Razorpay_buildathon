@@ -1,3 +1,4 @@
+"""Price negotiation logic to evaluate user counter-offers."""
 import json
 import os
 
