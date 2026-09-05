@@ -30,7 +30,7 @@ This project is a full-stack agentic checkout system built for the Razorpay buil
 
 The system is organized in four layers:
 
-**Core agent loop** — `src/agent.py` runs a Gemini 2.5 Flash function-calling loop. Tools registered with the model (`create_payment`, `negotiate_price`, `verify_item_price`, `revoke_action`) are implemented as Python functions. The model never sees raw Razorpay API calls; it only sees the tool results the agent chooses to surface.
+**Core agent loop** — `src/agent.py` runs a Gemini 2.5 Flash function-calling loop. Tools registered with the model (`create_payment`, `negotiate_price`, `refund_payment`, `verify_item_price`, `revoke_action`) are implemented as Python functions. The model never sees raw Razorpay API calls; it only sees the tool results the agent chooses to surface.
 
 **Trust & integrity** — `src/guardrail.py` is the policy engine: it reads `config/policy.json` at startup and applies spend cap, revocation, minimum-amount, and structuring checks in a fixed order before any payment is created. `src/idempotency.py` prevents duplicate orders from retry storms. `src/negotiation.py` evaluates counter-offers deterministically against the floor percentage — the model relays the result, it cannot modify it.
 
@@ -38,9 +38,13 @@ The system is organized in four layers:
 
 **Protocol layer** — `src/mcp_server.py` wraps `browse_catalog` and `create_purchase` as MCP tools (and exposes `catalog://items` as an MCP resource), so Claude Desktop or any MCP-compatible host can transact with the merchant without knowing anything about the internal agent. `src/shopper_agent.py` (persona: Scout) runs a second Gemini agent that queries multiple simulated merchants via `src/multi_merchant.py` and picks the best price before committing.
 
-![Architecture](docs/architecture-v1.png)
+**Growth extensions** — `negotiate_price` (`src/negotiation.py`) evaluates counter-offers deterministically against a fixed floor percentage; the model relays the result, it cannot modify it. `refund_payment` (`src/payment.py`) validates a required customer reason and a time window before attempting a refund.
 
-![Architecture](docs/architecture-v2.png)
+### System Layers
+![System Architecture Layers](docs/architecture-v2.png)
+
+### Transaction & Guardrail Flow
+![Transaction and Guardrail Flow](docs/architecture-v1.png)
 
 ---
 
@@ -157,7 +161,7 @@ python3 src/view_metrics.py
 python3 -m unittest discover -s tests -v
 ```
 
-**46 tests** across 7 modules: guardrail & safety, idempotency, MCP server tools, multi-merchant comparison, negotiation logic, price verification, and session state persistence. All pass in under 0.1 seconds (no network calls).
+**48 tests** across 8 modules: guardrail & safety, idempotency, MCP server tools, multi-merchant comparison, negotiation logic, price verification, refund reason validation, and session state persistence. All pass in under 0.1 seconds (no network calls).
 
 ### Automated conversation eval suite
 
@@ -166,3 +170,17 @@ python3 tests/scenarios/run_scenarios.py
 ```
 
 This runs a set of end-to-end conversation scenarios against the real Gemini API and evaluates agent behavior (correct denials, correct approvals, negotiation outcomes, adversarial resistance). **This calls the live Gemini API and will consume quota** — run it once for evaluation, not in CI loops.
+
+---
+
+## Known Limitations
+
+- `refund_payment` is fully unit-tested (reason validation, time window, idempotency), but this project's test-mode flow only creates Razorpay orders, never a completed payment — Razorpay's refund API requires a completed payment, so a live refund attempt in this demo will always fail with "no completed payment found." A production deployment with a real checkout/payment-capture step would not have this limitation.
+
+- A single message requesting multiple distinct items (e.g. "t-shirt and a cap") is not reliably handled — the model may combine them into one miscalculated tool call, which the price-integrity check correctly blocks rather than charging an incorrect amount, but the purchase does not complete either.
+
+- `config/products.json` is intentionally small for demo clarity. The guardrail, price-verification, negotiation, and MCP layers are fully catalog-agnostic — a production catalog of any size would work identically with no code changes.
+
+- Session state (`data/session_state.json`) is a single global file — there is no per-user or per-session isolation. This is sufficient for a single-user demo but would need to be replaced with a proper session store in production.
+
+- The automated scenario harness (`tests/scenarios/run_scenarios.py`) cannot simulate the interactive confirmation prompt that the real CLI uses for mid-range orders (₹500–₹2,000). Scenarios that trigger `needs_confirmation` test only the guardrail decision, not the full confirm-then-pay flow.

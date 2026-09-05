@@ -66,7 +66,11 @@ def build_system_instruction() -> str:
         "If a customer asks for a discount or tries to negotiate, always call negotiate_price for the real answer \u2014 "
         "never invent or promise a discount yourself. Relay exactly what the tool returns: if accepted, confirm that price; "
         "if countered, offer the counter as the best available; if rejected, explain why. "
-        "If the customer accepts a countered or accepted price, proceed to create_payment using that exact final price."
+        "If the customer accepts a countered or accepted price, proceed to create_payment using that exact final price. "
+        "If a customer asks for a refund, always ask them why before calling refund_payment \u2014 a reason is required. "
+        "Accept any reason they give in good faith; you are not the one who decides if it's valid, "
+        "only whether the refund policy (time window, one refund per order) allows it. "
+        "If a customer asks for multiple different items in one message, call create_payment separately for each item, with its own correct price — never combine multiple items into a single payment call."
     )
     return persona
 
@@ -79,6 +83,14 @@ def negotiate_price(item_name: str, requested_price_inr: float) -> dict:
     """
     Check whether a requested price for a catalog item is within the merchant's
     negotiation policy. Returns the policy decision — never invent a discount.
+    """
+    pass
+
+def refund_payment(reason: str) -> dict:
+    """
+    Initiate a refund for the user's most recent successful purchase. 
+    Use this if the customer asks to cancel or refund their last order.
+    The reason parameter must contain the customer's stated reason for the refund.
     """
     pass
 
@@ -99,7 +111,7 @@ def main():
             model='gemini-2.5-flash',
             config=types.GenerateContentConfig(
                 system_instruction=build_system_instruction(),
-                tools=[create_payment, negotiate_price],
+                tools=[create_payment, negotiate_price, refund_payment],
                 automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True)
             )
         )
@@ -255,7 +267,9 @@ def main():
                             
                         # Append to recent amounts and save state (skip if cancelled by user)
                         if tool_result.get("status") != "cancelled":
-                            recent_amounts.append({"amount_inr": amount_inr, "timestamp": now})
+                            order_info = tool_result.get("order", {})
+                            order_id = order_info.get("order_id") if isinstance(order_info, dict) else order_info
+                            recent_amounts.append({"amount_inr": amount_inr, "timestamp": now, "order_id": order_id})
                             state["recent_amounts"] = recent_amounts
                             session_state.save_state(state)
                             
@@ -320,6 +334,67 @@ def main():
                             types.Part.from_function_response(
                                 name="negotiate_price",
                                 response=neg_result
+                            )
+                        )
+                        if followup_response.text:
+                            print(f"\nAgent: {followup_response.text}")
+
+                    elif tool_call.name == "refund_payment":
+                        customer_reason = tool_call.args.get("reason", "")
+                        print(f"\n[Agent wants to call refund_payment(reason='{customer_reason}')]")
+                        refund_result = {}
+
+                        # Validate reason: empty, whitespace-only, or literally the tool name → deny
+                        if not customer_reason or not customer_reason.strip() or customer_reason.strip() == "refund_payment":
+                            deny_reason = "A reason is required before a refund can be processed."
+                            audit_log.log_action("refund_payment", 0, deny_reason, "denied_missing_reason", customer_reason=customer_reason)
+                            refund_result = {"status": "denied", "reason": deny_reason}
+                        elif not recent_amounts:
+                            refund_result = {"status": "failed", "reason": "No recent purchases found to refund."}
+                        else:
+                            last_purchase = recent_amounts[-1]
+                            last_order_id = last_purchase.get("order_id")
+                            amount_inr = last_purchase.get("amount_inr", 0.0)
+                            purchase_time = datetime.fromisoformat(last_purchase['timestamp'])
+                            
+                            if purchase_time.tzinfo is None:
+                                purchase_time = purchase_time.replace(tzinfo=timezone.utc)
+                                
+                            time_diff = datetime.now(timezone.utc) - purchase_time
+                            
+                            if time_diff.total_seconds() > 600: # 10 minutes
+                                reason = "Refund window expired. Refunds are only allowed within 10 minutes of purchase."
+                                audit_log.log_action("refund_payment", amount_inr, reason, "denied_time_boundary", customer_reason=customer_reason)
+                                refund_result = {"status": "denied", "reason": reason}
+                            elif not last_order_id:
+                                reason = "No valid transaction ID found for the last purchase."
+                                audit_log.log_action("refund_payment", amount_inr, reason, "failed", customer_reason=customer_reason)
+                                refund_result = {"status": "failed", "reason": reason}
+                            else:
+                                refund_key = f"refund_{last_order_id}"
+                                if idempotency.get_cached_result(refund_key):
+                                    reason = f"Transaction {last_order_id} has already been refunded."
+                                    audit_log.log_action("refund_payment", amount_inr, reason, "denied_idempotent", customer_reason=customer_reason)
+                                    refund_result = {"status": "denied", "reason": reason}
+                                else:
+                                    try:
+                                        refund_resp = payment.refund_payment(last_order_id, customer_reason)
+                                        reason = f"Successfully initiated refund for {last_order_id}."
+                                        audit_log.log_action("refund_payment", amount_inr, reason, "approved", customer_reason=customer_reason)
+                                        idempotency.save_result(refund_key, {"refund_id": refund_resp.get("refund_id", "mock_refund")})
+                                        refund_result = {"status": "success", "message": reason}
+                                    except payment.PaymentFailedError as e:
+                                        audit_log.log_action("refund_payment", amount_inr, str(e), "failed", customer_reason=customer_reason)
+                                        refund_result = {"status": "failed", "error": str(e)}
+                                    except Exception as e:
+                                        print(f"[Error] Failed to initiate refund: {e}")
+                                        audit_log.log_action("refund_payment", amount_inr, str(e), "failed", customer_reason=customer_reason)
+                                        refund_result = {"status": "error", "error": str(e)}
+
+                        followup_response = chat.send_message(
+                            types.Part.from_function_response(
+                                name="refund_payment",
+                                response=refund_result
                             )
                         )
                         if followup_response.text:
